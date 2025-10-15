@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <title>Vòng quay may mắn</title>
+  <style>
+    body{
+      margin:0;
+      height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:hsl(0, 0%, 100%);
+      font-family:Tahoma, Arial, sans-serif;
+      overflow:hidden;
+    }
+    .container{
+      text-align:center;
+      position:relative;
+      width:80vmin; 
+      max-width:600px;
+      z-index:1;
+    }
+    .arrow{
+      width:0;height:0;
+      border-left:18px solid transparent;
+      border-right:18px solid transparent;
+      border-top:34px solid red;
+      margin: 6px auto;
+    }
+    canvas#wheel{
+      display:block;
+      margin:0 auto;
+      background:white;
+      border-radius:50%;
+      box-shadow:0 6px 18px rgba(0,0,0,0.12);
+      width:100%;
+      height:auto;
+    }
+    #spinBtn{
+      margin-top:14px;
+      padding:10px 26px;
+      background:#007bff;color:white;border:none;border-radius:8px;
+      font-weight:700; cursor:pointer;
+    }
+    #spinBtn:disabled{ opacity:0.6; cursor:default; }
+    #resultOverlay{
+      position:fixed;
+      top:0; left:0;
+      width:100%; height:100%;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      background:rgba(0,0,0,0.5);
+      z-index:10;
+      display:none;
+    }
+    #resultText{
+      font-size:48px;
+      font-weight:bold;
+      color:#fff;
+      padding:20px 40px;
+      background:rgba(0,0,0,0.6);
+      border-radius:12px;
+      text-shadow:0 0 10px #ff0, 0 0 20px #f00;
+      animation: pop 0.6s ease;
+    }
+    @keyframes pop {
+      0% { transform:scale(0.2); opacity:0; }
+      100% { transform:scale(1); opacity:1; }
+    }
+    canvas#confettiCanvas{
+      position:fixed;
+      top:0;left:0;
+      width:100%;height:100%;
+      z-index:5;
+      pointer-events:none;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="arrow" aria-hidden="true"></div>
+    <canvas id="wheel"></canvas>
+    <div>
+      <button id="spinBtn">QUAY</button>
+    </div>
+  </div>
+
+  <div id="resultOverlay">
+    <div id="resultText"></div>
+  </div>
+
+  <canvas id="confettiCanvas"></canvas>
+
+<script>
+(() => {
+  const canvas = document.getElementById('wheel');
+  const ctx = canvas.getContext('2d');
+  const scale = window.devicePixelRatio || 1;
+
+  const slices = ["Mất lượt","Quà 1","Tạch","Quà 2","Chúc may mắn lần sau:(","Quà 3","+1 lượt quay","Quà 4","Một tràng vỗ tay!!"];
+  const colors = ["#6666ff","#ffff66","#66ffff","#99cc66","#cc66cc","#ff6666","#66ff66","#ff99ff","#66cccc"];
+
+  let capsMode = false;
+  document.addEventListener("keydown", (e) => {
+    if(e.code === "CapsLock"){
+      capsMode = !capsMode;
+      updateResultTab();
+    }
+  });
+
+  let currentAngle = 0;
+  let animating = false;
+  let animStart = 0;
+  let animDuration = 0;
+  let startAngle = 0;
+  let finalAngle = 0;
+  let chosenIndex = null;
+  let currentResult = "---";
+
+  let resultWindow;
+
+  const spinBtn = document.getElementById('spinBtn');
+  const resultOverlay = document.getElementById('resultOverlay');
+  const resultText = document.getElementById('resultText');
+
+  function resizeCanvas(){
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * scale;
+    canvas.height = rect.width * scale; 
+    ctx.setTransform(1,0,0,1,0,0); 
+    ctx.scale(scale, scale);
+  }
+
+  function drawWheel(angle){
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width;
+    const H = rect.width; 
+    const cx = W/2, cy = H/2;
+    const radius = W/2 * 0.9;
+    const arc = (2*Math.PI) / slices.length;
+
+    ctx.clearRect(0,0,W,H);
+
+    for(let i=0;i<slices.length;i++){
+      const start = angle + i*arc;
+      ctx.beginPath();
+      ctx.moveTo(cx,cy);
+      ctx.arc(cx,cy,radius,start,start+arc,false);
+      ctx.closePath();
+      ctx.fillStyle = colors[i % colors.length];
+      ctx.fill();
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      const mid = start + arc/2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(mid);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#000";
+      let fontSize = radius*0.06;
+      ctx.font = `${fontSize}px Tahoma, Arial`;
+      ctx.fillText(slices[i], radius * 0.65, 0);
+      ctx.restore();
+    }
+
+    ctx.beginPath();
+    ctx.arc(cx,cy, radius*0.12, 0, Math.PI*2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  function easeOutCubic(t){ return 1 - Math.pow(1 - t, 3); }
+
+  function frame(ts){
+    if(!animating){
+      drawWheel(currentAngle);
+      requestAnimationFrame(frame);
+      return;
+    }
+    const t = Math.min(1, (ts - animStart) / animDuration);
+    const eased = easeOutCubic(t);
+    currentAngle = startAngle + eased * (finalAngle - startAngle);
+    drawWheel(currentAngle);
+    updateResultTab();
+    if(t >= 1){
+      animating = false;
+      currentAngle = finalAngle;
+      drawWheel(currentAngle);
+      showResult();
+      spinBtn.disabled = false;
+    } else {
+      requestAnimationFrame(frame);
+    }
+  }
+
+  function openResultTab(){
+    if(!resultWindow || resultWindow.closed){
+      resultWindow = window.open("", "_blank");
+      resultWindow.document.write(`
+        <html>
+          <head><title>Kết quả quay</title></head>
+          <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;background:#f7f7f7;">
+            <h1 id="resultText" style="font-size:48px;color:#007bff;">${currentResult}</h1>
+            <p id="modeText" style="font-size:24px;color:#ff5500;">Mode: ${capsMode ? "Q mode" : "M mode"}</p>
+          </body>
+        </html>
+      `);
+      resultWindow.document.close();
+    }
+  }
+
+  function updateResultTab(){
+    if(resultWindow && !resultWindow.closed){
+      const resultEl = resultWindow.document.getElementById("resultText");
+      const modeEl = resultWindow.document.getElementById("modeText");
+      if(resultEl && modeEl){
+        resultEl.textContent = currentResult;
+        modeEl.textContent = "Mode: " + (capsMode ? "có quà" : "ko quà");
+      }
+    }
+  }
+
+  function startSpin(){
+    if(animating) return;
+    spinBtn.disabled = true;
+    resultOverlay.style.display = "none";
+
+    currentResult = "---";
+    openResultTab();
+    updateResultTab();
+
+    let pool = capsMode ? [1,3,5,7] : [0,2,4,6,8];
+    chosenIndex = pool[Math.floor(Math.random() * pool.length)];
+    const arc = (2*Math.PI)/slices.length;
+    const pointerAngle = -Math.PI/2;
+
+    const sectorCenterCurrent = currentAngle + chosenIndex*arc + arc/2;
+    let delta = (pointerAngle - sectorCenterCurrent) % (2*Math.PI);
+    if(delta < 0) delta += 2*Math.PI;
+
+    const extraSpins = Math.floor(Math.random()*3) + 5;
+    delta += extraSpins * 2 * Math.PI;
+
+    startAngle = currentAngle;
+    finalAngle = startAngle + delta;
+    animDuration = 4200 + extraSpins*200;
+    animStart = performance.now();
+    animating = true;
+    requestAnimationFrame(frame);
+  }
+
+  function showResult(){
+    currentResult = slices[chosenIndex];
+    updateResultTab();
+
+    const text = slices[chosenIndex];
+    const modeText = capsMode ? "có quà" : "ko quà";
+
+    resultText.textContent = `🎉 Kết quả: ${text} 🎉`;
+    resultOverlay.style.display = "flex";
+    startConfetti();
+
+    setTimeout(()=>{
+      resultOverlay.style.display = "none";
+      stopConfetti();
+      spinBtn.disabled = false; 
+    },3000);
+  }
+
+  spinBtn.addEventListener('click', startSpin);
+
+  window.addEventListener("resize", ()=>{
+    resizeCanvas();
+    drawWheel(currentAngle);
+    confettiCanvas.width = window.innerWidth;
+    confettiCanvas.height = window.innerHeight;
+  });
+
+  resizeCanvas();
+  drawWheel(currentAngle);
+  requestAnimationFrame(frame);
+
+  const confettiCanvas = document.getElementById('confettiCanvas');
+  const cctx = confettiCanvas.getContext('2d');
+  let confettis = [];
+  let fadingOut = false;
+  confettiCanvas.width = window.innerWidth;
+  confettiCanvas.height = window.innerHeight;
+
+  function ConfettiPiece(){
+    this.x = Math.random()*confettiCanvas.width;
+    this.y = Math.random()*-confettiCanvas.height;
+    this.size = Math.random()*6+4;
+    this.color = `hsl(${Math.random()*360},100%,50%)`;
+    this.speedY = Math.random()*3+2;
+    this.speedX = Math.random()*2-1;
+    this.rotation = Math.random()*360;
+    this.rotationSpeed = Math.random()*5-2.5;
+    this.shape = Math.random() > 0.5 ? "rect" : "circle";
+    this.alpha = 1;
+  }
+
+  function startConfetti(){
+    fadingOut = false;
+    confettis = [];
+    for(let i=0;i<200;i++) confettis.push(new ConfettiPiece());
+    requestAnimationFrame(updateConfetti);
+  }
+
+  function stopConfetti(){ fadingOut = true; }
+
+  function updateConfetti(){
+    cctx.clearRect(0,0,confettiCanvas.width,confettiCanvas.height);
+    confettis.forEach(c=>{
+      c.y += c.speedY;
+      c.x += c.speedX;
+      c.rotation += c.rotationSpeed;
+      if(fadingOut) c.alpha -= 0.02;
+      cctx.save();
+      cctx.globalAlpha = Math.max(0, c.alpha);  
+      cctx.translate(c.x,c.y);
+      cctx.rotate(c.rotation * Math.PI/180);
+      cctx.fillStyle = c.color;
+      if(c.shape === "rect"){
+        cctx.fillRect(-c.size/2,-c.size/2,c.size,c.size*0.6);
+      } else {
+        cctx.beginPath();
+        cctx.arc(0,0,c.size/2,0,Math.PI*2);
+        cctx.fill();
+      }
+      cctx.restore();
+    });
+    confettis = confettis.filter(c => c.alpha > 0);
+    if(confettis.length>0) requestAnimationFrame(updateConfetti);
+    else fadingOut = false;
+  }
+})();
+</script>
+</body>
+</html>
